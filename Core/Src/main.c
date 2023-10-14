@@ -63,37 +63,6 @@ static void MX_SPI2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static void plot_data_task(lv_obj_t *plot, lv_chart_series_t *sin_series, lv_chart_series_t *cos_series, bool sin_enabled, bool cos_enabled)
-{
-	static uint32_t i = 0;
-	static bool sin_clear = false;
-	static bool cos_clear = false;
-
-	if (sin_enabled) {
-		lv_chart_set_next_value(plot, sin_series, 100.0f * sin(2 * M_PI * 40 * i / 1000));
-		sin_clear = false;
-	}
-	else if (!sin_clear) {
-		lv_chart_set_all_value(plot, sin_series, LV_CHART_POINT_NONE);
-		sin_clear = true;
-	}
-
-	if (cos_enabled) {
-		lv_chart_set_next_value(plot, cos_series, 100.0f * cos(2 * M_PI * 40 * i / 1000));
-		cos_clear = false;
-	}
-	else if (!cos_clear) {
-		lv_chart_set_all_value(plot, cos_series, LV_CHART_POINT_NONE);
-		cos_clear = true;
-	}
-
-	if (sin_enabled || cos_enabled) {
-		++i;
-	}
-	else {
-		i = 0;
-	}
-}
 
 /* USER CODE END 0 */
 
@@ -132,34 +101,117 @@ int main(void)
 
   lvgl_init();
 
-  lv_obj_t *plot = lv_chart_create(lv_scr_act());
-  lv_obj_set_size(plot, 320-4, 240-4);
-  lv_obj_align(plot, LV_ALIGN_CENTER, 0, 0);
-  lv_chart_set_type(plot, LV_CHART_TYPE_LINE);
-  lv_chart_set_point_count(plot, 100);
-  lv_chart_set_range(plot, LV_CHART_AXIS_PRIMARY_Y, -105, 105);
-  lv_obj_set_style_size(plot, 0, LV_PART_INDICATOR);
+  /* LVGL seems to not support adding radius only to selected corners so for now just disable it completely */
+  const lv_coord_t corner_radius = 0;
+  const lv_coord_t sidebar_width = 50;
+  const lv_coord_t tab_width = ILI9341_WIDTH - sidebar_width;
+  const lv_coord_t player_tab_margin = 20;
+  const lv_coord_t progress_bar_width = tab_width - 2 * player_tab_margin;
+  const lv_coord_t progress_bar_height = 10;
+  const lv_coord_t time_labels_offset_y = 15;
+  const lv_coord_t play_diameter = 45;
+  const lv_coord_t nav_diameter = 30;
 
-  lv_chart_series_t *sin_series = lv_chart_add_series(plot, lv_palette_main(LV_PALETTE_ORANGE), LV_CHART_AXIS_PRIMARY_Y);
-  lv_chart_series_t *cos_series = lv_chart_add_series(plot, lv_palette_main(LV_PALETTE_GREEN), LV_CHART_AXIS_PRIMARY_Y);
+  /* Create sidebar */
+  lv_obj_t *sidebar = lv_tabview_create(lv_scr_act(), LV_DIR_LEFT, sidebar_width);
+  lv_obj_clear_flag(lv_tabview_get_content(sidebar), LV_OBJ_FLAG_SCROLLABLE);
 
-  lv_obj_t *sin_checkbox = lv_checkbox_create(lv_scr_act());
-  lv_checkbox_set_text(sin_checkbox, "Plot sin(x)");
-  lv_obj_align(sin_checkbox, LV_ALIGN_BOTTOM_LEFT, 0, -30);
+  /* Style buttons */
+  lv_obj_t *buttons = lv_tabview_get_tab_btns(sidebar);
+  lv_obj_set_style_border_side(buttons, LV_BORDER_SIDE_RIGHT, LV_PART_ITEMS | LV_STATE_CHECKED);
+  lv_obj_set_style_radius(buttons, corner_radius, LV_PART_MAIN);
 
-  lv_obj_t *cos_checkbox = lv_checkbox_create(lv_scr_act());
-  lv_checkbox_set_text(cos_checkbox, "Plot cos(x)");
-  lv_obj_align(cos_checkbox, LV_ALIGN_BOTTOM_LEFT, 0, -5);
+
+  // TODO add volume
+
+  /* Create player view tab */
+  lv_obj_t *tab_player = lv_tabview_add_tab(sidebar, LV_SYMBOL_AUDIO);
+
+  lv_obj_t *title_label = lv_label_create(tab_player);
+  lv_label_set_text(title_label, "Title");
+  lv_obj_set_style_text_font(title_label, &lv_font_montserrat_22, 0);
+  lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 0);
+
+  lv_obj_t *album_label = lv_label_create(tab_player);
+  lv_label_set_text(album_label, "Album");
+  lv_obj_set_style_text_font(album_label, &lv_font_montserrat_18, 0);
+  lv_obj_align_to(album_label, title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8); // TODO fix these magic numbers
+
+  lv_obj_t *artist_label = lv_label_create(tab_player);
+  lv_label_set_text(artist_label, "Artist");
+  lv_obj_align_to(artist_label, album_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+
+  lv_obj_t *progress_bar = lv_bar_create(tab_player); // TODO style
+  lv_obj_set_size(progress_bar, progress_bar_width, progress_bar_height);
+  lv_obj_align_to(progress_bar, artist_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 30);
+  lv_bar_set_value(progress_bar, 70, LV_ANIM_OFF);
+
+  lv_obj_t *elapsed_time = lv_label_create(tab_player);
+  lv_label_set_text(elapsed_time, "01:39");
+  lv_obj_align_to(elapsed_time, progress_bar, LV_ALIGN_OUT_BOTTOM_LEFT, 0, time_labels_offset_y);
+
+  lv_obj_t *total_time = lv_label_create(tab_player);
+  lv_label_set_text(total_time, "05:55");
+  lv_obj_align_to(total_time, progress_bar, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, time_labels_offset_y);
+
+  lv_obj_t *play_button = lv_btn_create(tab_player);
+  lv_obj_set_size(play_button, play_diameter, play_diameter);
+  lv_obj_set_style_radius(play_button, LV_RADIUS_CIRCLE, 0);
+  lv_obj_align_to(play_button, progress_bar, LV_ALIGN_OUT_BOTTOM_MID, 0, 40);
+
+  lv_obj_t *play_icon = lv_label_create(play_button);
+  lv_label_set_text(play_icon, LV_SYMBOL_PLAY);
+  lv_obj_center(play_icon);
+
+  lv_obj_t *prev_button = lv_btn_create(tab_player);
+  lv_obj_set_size(prev_button, nav_diameter, nav_diameter);
+  lv_obj_set_style_radius(prev_button, LV_RADIUS_CIRCLE, 0);
+  lv_obj_align_to(prev_button, play_button, LV_ALIGN_OUT_LEFT_MID, -35, 0);
+
+  lv_obj_t *prev_icon = lv_label_create(prev_button);
+  lv_label_set_text(prev_icon, LV_SYMBOL_PREV);
+  lv_obj_center(prev_icon);
+
+  lv_obj_t *next_button = lv_btn_create(tab_player);
+  lv_obj_set_size(next_button, nav_diameter, nav_diameter);
+  lv_obj_set_style_radius(next_button, LV_RADIUS_CIRCLE, 0);
+  lv_obj_align_to(next_button, play_button, LV_ALIGN_OUT_RIGHT_MID, 35, 0);
+
+  lv_obj_t *next_icon = lv_label_create(next_button);
+  lv_label_set_text(next_icon, LV_SYMBOL_NEXT);
+  lv_obj_center(next_icon);
+
+  /* Create file explorer tab */
+  lv_obj_t *tab_files = lv_tabview_add_tab(sidebar, LV_SYMBOL_FILE);
+  lv_obj_set_style_pad_left(tab_files, 0, 0);
+  lv_obj_set_style_pad_top(tab_files, 0, 0);
+  lv_obj_clear_flag(tab_files, LV_OBJ_FLAG_SCROLLABLE);
+
+  /* Create files list */
+  lv_obj_t *list_files = lv_list_create(tab_files);
+  lv_obj_set_size(list_files, tab_width, ILI9341_HEIGHT); // TODO define as GUI_MAX_HEIGHT
+  lv_obj_set_style_radius(list_files, corner_radius, LV_PART_MAIN);
+
+  const char *songs_list[] = {
+		  "01. Test.mp3", "02. Test.mp3", "03. Test.mp3",
+		  "04. Test.mp3", "05. Test.mp3", "06. Test.mp3",
+		  "07. Test.mp3", "08. Test.mp3", "09. Test.mp3",
+		  "10. Test.mp3", "11. Test.mp3", "12. Test.mp3"
+  };
+
+  lv_list_add_text(list_files, "/test/path/to/folder");
+  lv_list_add_btn(list_files, NULL, "..");
+  for (size_t i = 0; i < 12; ++i) {
+	  lv_list_add_btn(list_files, LV_SYMBOL_AUDIO, songs_list[i]);
+  }
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  const uint32_t lv_task_refresh_time_ms = 1;
-  const uint32_t plot_refresh_time_ms = 5;
+  const uint32_t lv_task_refresh_time_ms = 5;
 
   uint32_t lv_last_tick = 0;
-  uint32_t plot_last_tick = 0;
   uint32_t current_tick;
 
   while (1)
@@ -169,13 +221,6 @@ int main(void)
 	  if ((current_tick - lv_last_tick) >= lv_task_refresh_time_ms) {
 		  lv_task_handler();
 		  lv_last_tick = current_tick;
-	  }
-
-	  if ((current_tick - plot_last_tick) >= plot_refresh_time_ms) {
-		  const bool sin_enabled = lv_obj_get_state(sin_checkbox) & LV_STATE_CHECKED;
-		  const bool cos_enabled = lv_obj_get_state(cos_checkbox) & LV_STATE_CHECKED;
-		  plot_data_task(plot, sin_series, cos_series, sin_enabled, cos_enabled);
-		  plot_last_tick = current_tick;
 	  }
     /* USER CODE END WHILE */
 
