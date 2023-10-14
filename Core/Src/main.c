@@ -63,15 +63,36 @@ static void MX_SPI2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static void event_pressed_handler(lv_event_t *event)
+static void plot_data_task(lv_obj_t *plot, lv_chart_series_t *sin_series, lv_chart_series_t *cos_series, bool sin_enabled, bool cos_enabled)
 {
-	lv_label_set_text(lv_event_get_user_data(event), "Pressed!");
-}
+	static uint32_t i = 0;
+	static bool sin_clear = false;
+	static bool cos_clear = false;
 
-static void event_released_handler(lv_event_t *event)
-{
+	if (sin_enabled) {
+		lv_chart_set_next_value(plot, sin_series, 100.0f * sin(2 * M_PI * 40 * i / 1000));
+		sin_clear = false;
+	}
+	else if (!sin_clear) {
+		lv_chart_set_all_value(plot, sin_series, LV_CHART_POINT_NONE);
+		sin_clear = true;
+	}
 
-	lv_label_set_text(lv_event_get_user_data(event), "Released!");
+	if (cos_enabled) {
+		lv_chart_set_next_value(plot, cos_series, 100.0f * cos(2 * M_PI * 40 * i / 1000));
+		cos_clear = false;
+	}
+	else if (!cos_clear) {
+		lv_chart_set_all_value(plot, cos_series, LV_CHART_POINT_NONE);
+		cos_clear = true;
+	}
+
+	if (sin_enabled || cos_enabled) {
+		++i;
+	}
+	else {
+		i = 0;
+	}
 }
 
 /* USER CODE END 0 */
@@ -111,23 +132,51 @@ int main(void)
 
   lvgl_init();
 
-  lv_obj_t *btn1 = lv_btn_create(lv_scr_act());
-  lv_obj_t *label = lv_label_create(btn1);
-  lv_label_set_text(label, "Press me!");
+  lv_obj_t *plot = lv_chart_create(lv_scr_act());
+  lv_obj_set_size(plot, 320-4, 240-4);
+  lv_obj_align(plot, LV_ALIGN_CENTER, 0, 0);
+  lv_chart_set_type(plot, LV_CHART_TYPE_LINE);
+  lv_chart_set_point_count(plot, 100);
+  lv_chart_set_range(plot, LV_CHART_AXIS_PRIMARY_Y, -105, 105);
+  lv_obj_set_style_size(plot, 0, LV_PART_INDICATOR);
 
-  lv_obj_add_event_cb(btn1, event_pressed_handler, LV_EVENT_PRESSED, label);
-  lv_obj_add_event_cb(btn1, event_released_handler, LV_EVENT_RELEASED, label);
-  lv_obj_align(btn1, LV_ALIGN_CENTER, -50, 0);
+  lv_chart_series_t *sin_series = lv_chart_add_series(plot, lv_palette_main(LV_PALETTE_ORANGE), LV_CHART_AXIS_PRIMARY_Y);
+  lv_chart_series_t *cos_series = lv_chart_add_series(plot, lv_palette_main(LV_PALETTE_GREEN), LV_CHART_AXIS_PRIMARY_Y);
 
+  lv_obj_t *sin_checkbox = lv_checkbox_create(lv_scr_act());
+  lv_checkbox_set_text(sin_checkbox, "Plot sin(x)");
+  lv_obj_align(sin_checkbox, LV_ALIGN_BOTTOM_LEFT, 0, -30);
+
+  lv_obj_t *cos_checkbox = lv_checkbox_create(lv_scr_act());
+  lv_checkbox_set_text(cos_checkbox, "Plot cos(x)");
+  lv_obj_align(cos_checkbox, LV_ALIGN_BOTTOM_LEFT, 0, -5);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  const uint32_t lv_task_refresh_time_ms = 1;
+  const uint32_t plot_refresh_time_ms = 5;
+
+  uint32_t lv_last_tick = 0;
+  uint32_t plot_last_tick = 0;
+  uint32_t current_tick;
+
   while (1)
   {
-	  lv_task_handler();
-	  HAL_Delay(5);
+	  current_tick = HAL_GetTick();
+
+	  if ((current_tick - lv_last_tick) >= lv_task_refresh_time_ms) {
+		  lv_task_handler();
+		  lv_last_tick = current_tick;
+	  }
+
+	  if ((current_tick - plot_last_tick) >= plot_refresh_time_ms) {
+		  const bool sin_enabled = lv_obj_get_state(sin_checkbox) & LV_STATE_CHECKED;
+		  const bool cos_enabled = lv_obj_get_state(cos_checkbox) & LV_STATE_CHECKED;
+		  plot_data_task(plot, sin_series, cos_series, sin_enabled, cos_enabled);
+		  plot_last_tick = current_tick;
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
